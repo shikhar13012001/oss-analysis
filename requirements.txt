@@ -1,0 +1,5 @@
+python-telegram-bot==20.7
+telethon>=1.35.0,<2.0.0
+httpx==0.25.2
+python-dotenv==1.0.1
+python-slugify==8.0.4
