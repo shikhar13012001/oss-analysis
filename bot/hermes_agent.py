@@ -1,20 +1,32 @@
-import json
-import re
+"""Hermes analysis agent: calls Ollama Cloud and returns a structured analysis."""
+
+from __future__ import annotations
+
+import logging
 from typing import Any
 
 import httpx
+
+from bot._http import with_retries
+from bot.analysis_schema import AnalysisParseError, parse_analysis
 from bot.config import OLLAMA_API_KEY, OLLAMA_HOST, OLLAMA_MODEL
 from bot.github_client import RepoData
+
+log = logging.getLogger("hermes.agent")
+
+
+class OllamaAuthError(RuntimeError):
+    """Raised when Ollama rejects the API key."""
 
 
 def _headers() -> dict[str, str]:
     if not OLLAMA_API_KEY:
-        raise RuntimeError("Set OLLAMA_API_KEY before running Hermes.")
-
+        raise OllamaAuthError("Set OLLAMA_API_KEY before running Hermes.")
     return {
         "Authorization": f"Bearer {OLLAMA_API_KEY}",
         "Content-Type": "application/json",
     }
+
 
 SYSTEM_PROMPT = """You are Hermes, a brutally honest commercial viability analyst for open-source GitHub repositories.
 
@@ -155,6 +167,7 @@ Be strict. The majority of repos should be rejected.
 Only qualify repos where a real person with real budget has a real pain this product solves.
 If you are unsure, reject."""
 
+
 def _build_user_message(
     repo: RepoData,
     telegram_message_text: str = "",
@@ -186,12 +199,37 @@ README CONTENT:
 {repo.readme_content or "No README found."}"""
 
 
+async def _call_ollama(payload: dict[str, Any]) -> dict[str, Any]:
+    """POST to Ollama chat endpoint with retries on transient failures."""
+    url = f"{OLLAMA_HOST.rstrip('/')}/api/chat"
+
+    async def _do(client: httpx.AsyncClient) -> dict[str, Any]:
+        r = await client.post(url, headers=_headers(), json=payload)
+        if r.status_code in (401, 403):
+            raise OllamaAuthError(
+                f"Ollama rejected the API key ({r.status_code}). "
+                "Check OLLAMA_API_KEY and OLLAMA_HOST."
+            )
+        r.raise_for_status()
+        return r.json()
+
+    return await with_retries(
+        _do, op="ollama:chat", max_attempts=3, base_delay=2.0,
+        timeout=httpx.Timeout(120.0, connect=15.0),
+    )
+
+
 async def analyse_repo(
     repo: RepoData,
     telegram_message_text: str = "",
     source_channel: str = "",
     source_message_url: str | None = None,
 ) -> dict[str, Any]:
+    """
+    Run the analysis prompt against Ollama and return a validated, normalised
+    analysis dict. Retries the HTTP call on transient failures; the JSON parse
+    is retried once by re-requesting if the first response is malformed.
+    """
     payload = {
         "model": OLLAMA_MODEL,
         "messages": [
@@ -210,18 +248,36 @@ async def analyse_repo(
         "options": {"temperature": 0},
     }
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        response = await client.post(
-            f"{OLLAMA_HOST.rstrip('/')}/api/chat",
-            headers=_headers(),
-            json=payload,
-        )
-        response.raise_for_status()
-        data = response.json()
+    last_parse_error: AnalysisParseError | None = None
+    for attempt in range(1, 3):  # one retry specifically for malformed JSON
+        try:
+            data = await _call_ollama(payload)
+        except OllamaAuthError:
+            raise
+        except httpx.HTTPStatusError:
+            raise
 
-    raw = (data.get("message", {}).get("content") or "").strip()
-    if not raw:
-        raise ValueError("Ollama returned an empty response.")
-    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw = re.sub(r"\s*```$", "", raw)
-    return json.loads(raw)
+        raw = (data.get("message", {}).get("content") or "").strip()
+        try:
+            return parse_analysis(raw)
+        except AnalysisParseError as exc:
+            last_parse_error = exc
+            log.warning("Ollama returned malformed JSON (attempt %d): %s",
+                        attempt, exc)
+            if attempt == 1:
+                payload["messages"].append({
+                    "role": "assistant",
+                    "content": raw,
+                })
+                payload["messages"].append({
+                    "role": "user",
+                    "content": (
+                        "Your previous response was not valid JSON. "
+                        "Return ONLY the JSON object described above, with no "
+                        "markdown fences, no commentary, and no text outside "
+                        "the JSON."
+                    ),
+                })
+
+    assert last_parse_error is not None
+    raise last_parse_error

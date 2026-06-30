@@ -2,17 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { getRejectedBySlug } from "@/lib/queries";
-
-const CAT_LABELS: Record<string, string> = {
-  legal_risk:          "Legal risk",
-  exploit_tool:        "Exploit / cheat tool",
-  hardware_dependency: "Hardware dependency",
-  research_only:       "Research only",
-  already_exists:      "Already a product",
-  too_niche:           "Too niche",
-  no_license:          "No license",
-  complex_setup:       "Complex setup",
-};
+import { catLabel, formatStars, licenseRiskDetailColorClass, safeText } from "@/lib/format";
 
 export default async function RejectedDetailPage({ params }: { params: { slug: string } }) {
   const repo = await getRejectedBySlug(params.slug);
@@ -21,103 +11,108 @@ export default async function RejectedDetailPage({ params }: { params: { slug: s
   return (
     <div className="max-w-2xl">
       {/* Breadcrumb */}
-      <nav className="text-sm text-zinc-600 mb-6">
-        <a href="/rejected" className="hover:text-zinc-400 transition-colors">Rejected</a>
-        <span className="mx-2">›</span>
-        <span className="text-zinc-400">{repo.repoName}</span>
+      <nav className="text-xs text-ash mb-8">
+        <a href="/rejected" className="hover:text-mute transition-colors">Rejected</a>
+        <span className="mx-2 text-stone">›</span>
+        <span className="text-mute">{safeText(repo.repoName)}</span>
       </nav>
 
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <span className="text-xs text-red-300 bg-red-950/60 ring-1 ring-red-800 px-2.5 py-1 rounded-md font-medium">
+      <div className="mb-10">
+        <div className="flex flex-wrap items-center gap-1.5 mb-5">
+          <span className="text-xs text-accent-red bg-accent-red/10 ring-1 ring-accent-red/25 px-2 py-0.5 rounded font-medium">
             ✕ Rejected
           </span>
-          <span className="text-xs text-zinc-400 bg-zinc-900 ring-1 ring-zinc-800 px-2.5 py-1 rounded-md">
-            {CAT_LABELS[repo.rejectionCategory ?? ""] ?? repo.rejectionCategory?.replace(/_/g, " ")}
+          <span className="text-xs text-mute bg-surface-elevated ring-1 ring-hairline px-2 py-0.5 rounded">
+            {catLabel(repo.rejectionCategory)}
           </span>
-          <span className="text-xs text-zinc-500 bg-zinc-900 ring-1 ring-zinc-800 px-2.5 py-1 rounded-md">
-            Score {repo.viabilityScore}/10
+          <span className="text-xs text-ash bg-surface-elevated ring-1 ring-hairline px-2 py-0.5 rounded">
+            Score {repo.viabilityScore ?? 0}/10
           </span>
           {repo.couldBeFixed && (
-            <span className="text-xs text-amber-300 bg-amber-950/60 ring-1 ring-amber-800 px-2.5 py-1 rounded-md">
+            <span className="text-xs text-accent-yellow bg-accent-yellow/10 ring-1 ring-accent-yellow/25 px-2 py-0.5 rounded">
               ⚡ Could be fixed
             </span>
           )}
           {repo.isDraft && (
-            <span className="text-xs text-amber-400 bg-amber-950/50 ring-1 ring-amber-800 px-2.5 py-1 rounded-md font-medium">
+            <span className="text-xs text-accent-yellow bg-accent-yellow/10 ring-1 ring-accent-yellow/25 px-2 py-0.5 rounded font-medium">
               DRAFT
             </span>
           )}
         </div>
 
-        <h1 className="text-3xl font-semibold tracking-tight mb-2">{repo.repoName}</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-ink mb-2">{safeText(repo.repoName)}</h1>
 
-        <div className="flex flex-wrap gap-4 text-sm text-zinc-500 mb-2">
-          <span>by {repo.owner}</span>
-          <span>★ {repo.stars?.toLocaleString()}</span>
-          <span>{repo.language}</span>
-          <span>License: {repo.licenseSpdx ?? "none"}</span>
+        <div className="flex flex-wrap gap-4 text-xs text-ash mb-3">
+          <span>by {safeText(repo.owner)}</span>
+          <span>★ {formatStars(repo.stars)}</span>
+          <span>{safeText(repo.language, "—")}</span>
+          <span>License: {safeText(repo.licenseSpdx, "none")}</span>
         </div>
 
-        <a href={repo.githubUrl} target="_blank" rel="noopener noreferrer"
-          className="text-sm text-zinc-600 hover:text-zinc-300 transition-colors">
-          {repo.githubUrl} ↗
-        </a>
+        {repo.githubUrl && (
+          <a href={repo.githubUrl} target="_blank" rel="noopener noreferrer"
+            className="text-xs text-ash hover:text-mute transition-colors">
+            {repo.githubUrl} ↗
+          </a>
+        )}
       </div>
 
       {/* Summary */}
       {repo.summary && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 mb-5">
-          <div className="text-xs text-zinc-500 uppercase tracking-wider font-medium mb-2">What this repo does</div>
-          <p className="text-sm text-zinc-300 leading-relaxed">{repo.summary}</p>
+        <div className="bg-surface border border-hairline rounded-lg p-5 mb-4">
+          <div className="text-[10px] text-ash uppercase tracking-widest font-medium mb-2">What this repo does</div>
+          <p className="text-sm text-body leading-relaxed">{repo.summary}</p>
         </div>
       )}
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         {/* Why rejected */}
-        <div className="bg-red-950/30 border border-red-900/40 rounded-xl p-5">
-          <h2 className="text-sm font-medium text-red-400 uppercase tracking-wider mb-3">
+        <div className="bg-accent-red/5 border border-accent-red/20 rounded-lg p-5">
+          <h2 className="text-[10px] font-medium text-accent-red/70 uppercase tracking-widest mb-3">
             Why this was rejected
           </h2>
-          <ul className="space-y-2">
-            {repo.rejectionReasons?.map((r, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-zinc-300">
-                <span className="text-red-500 mt-0.5 shrink-0">✕</span>{r}
-              </li>
-            ))}
-          </ul>
+          {(repo.rejectionReasons?.length ?? 0) > 0 ? (
+            <ul className="space-y-2">
+              {repo.rejectionReasons!.map((r, i) => (
+                <li key={i} className="flex items-start gap-2.5 text-sm text-body">
+                  <span className="text-accent-red mt-0.5 shrink-0">✕</span>{r}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-ash">No specific reasons were recorded.</p>
+          )}
         </div>
 
         {/* License note */}
         {repo.licenseRiskReason && (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-            <div className="text-xs text-zinc-500 uppercase tracking-wider font-medium mb-2">License risk</div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className={`text-sm font-medium ${
-                repo.licenseRisk === "Low"  ? "text-emerald-400" :
-                repo.licenseRisk === "High" ? "text-red-400" : "text-amber-400"
-              }`}>{repo.licenseRisk}</span>
-              <span className="text-xs text-zinc-600">· {repo.licenseSpdx}</span>
+          <div className="bg-surface border border-hairline rounded-lg p-5">
+            <div className="text-[10px] text-ash uppercase tracking-widest font-medium mb-2">License risk</div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`text-sm font-medium ${licenseRiskDetailColorClass(repo.licenseRisk)}`}>
+                {safeText(repo.licenseRisk, "Unknown")}
+              </span>
+              <span className="text-xs text-ash">· {safeText(repo.licenseSpdx, "none")}</span>
             </div>
-            <p className="text-sm text-zinc-400 leading-relaxed">{repo.licenseRiskReason}</p>
+            <p className="text-sm text-mute leading-relaxed">{repo.licenseRiskReason}</p>
           </div>
         )}
 
         {/* Could be fixed */}
         {repo.couldBeFixed && repo.howToFix ? (
-          <div className="bg-amber-950/30 border border-amber-900/40 rounded-xl p-5">
-            <h2 className="text-sm font-medium text-amber-400 uppercase tracking-wider mb-3">
+          <div className="bg-accent-yellow/5 border border-accent-yellow/20 rounded-lg p-5">
+            <h2 className="text-[10px] font-medium text-accent-yellow/70 uppercase tracking-widest mb-3">
               How it could be fixed
             </h2>
-            <p className="text-sm text-zinc-300 leading-relaxed">{repo.howToFix}</p>
+            <p className="text-sm text-body leading-relaxed">{repo.howToFix}</p>
           </div>
         ) : !repo.couldBeFixed ? (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-            <h2 className="text-sm font-medium text-zinc-600 uppercase tracking-wider mb-2">
+          <div className="bg-surface border border-hairline rounded-lg p-5">
+            <h2 className="text-[10px] font-medium text-ash uppercase tracking-widest mb-2">
               Can this be fixed?
             </h2>
-            <p className="text-sm text-zinc-600">
+            <p className="text-sm text-ash">
               No — the core blocker cannot be resolved without fundamentally changing the project.
             </p>
           </div>
@@ -125,14 +120,14 @@ export default async function RejectedDetailPage({ params }: { params: { slug: s
 
         {/* Alternative uses */}
         {repo.alternativeUses && repo.alternativeUses.length > 0 && (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
-            <h2 className="text-sm font-medium text-zinc-500 uppercase tracking-wider mb-3">
+          <div className="bg-surface border border-hairline rounded-lg p-5">
+            <h2 className="text-[10px] font-medium text-ash uppercase tracking-widest mb-3">
               Alternative uses
             </h2>
             <ul className="space-y-2">
               {repo.alternativeUses.map((u, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-zinc-300">
-                  <span className="text-zinc-600 mt-0.5 shrink-0">→</span>{u}
+                <li key={i} className="flex items-start gap-2.5 text-sm text-body">
+                  <span className="text-ash mt-0.5 shrink-0">→</span>{u}
                 </li>
               ))}
             </ul>

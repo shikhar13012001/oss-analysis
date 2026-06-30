@@ -3,61 +3,63 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { getQualifiedBySlug } from "@/lib/queries";
 import IdeaTabs from "./IdeaTabs";
+import { formatStars, revenueClass, safeText } from "@/lib/format";
 
 export default async function IdeaPage({ params }: { params: { slug: string } }) {
   const idea = await getQualifiedBySlug(params.slug);
   if (!idea) notFound();
 
-  const RISK_CLASS =
-    idea.licenseRisk === "Low"  ? "text-emerald-400 bg-emerald-950/60 ring-emerald-800" :
-    idea.licenseRisk === "High" ? "text-red-400     bg-red-950/60     ring-red-800"     :
-                                  "text-amber-400   bg-amber-950/60   ring-amber-800";
-
-  const REVENUE_CLASS =
-    idea.revenuePotential === "High"   ? "text-emerald-300 bg-emerald-900/60 ring-emerald-800" :
-    idea.revenuePotential === "Medium" ? "text-amber-300   bg-amber-900/60   ring-amber-800"   :
-                                         "text-zinc-400    bg-zinc-800        ring-zinc-700";
+  const riskClass =
+    idea.licenseRisk === "Low"  ? "text-accent-green bg-accent-green/10 ring-accent-green/25" :
+    idea.licenseRisk === "High" ? "text-accent-red   bg-accent-red/10   ring-accent-red/25"   :
+                                  "text-accent-yellow bg-accent-yellow/10 ring-accent-yellow/25";
 
   return (
     <div className="max-w-3xl">
       {/* Breadcrumb */}
-      <nav className="text-sm text-zinc-600 mb-6">
-        <a href="/ideas" className="hover:text-zinc-400 transition-colors">Ideas</a>
-        <span className="mx-2">›</span>
-        <span className="text-zinc-400">{idea.productName}</span>
+      <nav className="text-xs text-ash mb-8">
+        <a href="/ideas" className="hover:text-mute transition-colors">Ideas</a>
+        <span className="mx-2 text-stone">›</span>
+        <span className="text-mute">{safeText(idea.productName, idea.repoName)}</span>
       </nav>
 
       {/* Badges */}
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <span className={`text-xs px-2.5 py-1 rounded-md font-medium ring-1 ${REVENUE_CLASS}`}>
-          {idea.revenuePotential} revenue potential
+      <div className="flex flex-wrap items-center gap-1.5 mb-5">
+        <span className={`text-xs px-2 py-0.5 rounded font-medium ring-1 ${revenueClass(idea.revenuePotential)}`}>
+          {safeText(idea.revenuePotential, "Low")} potential
         </span>
-        <span className={`text-xs px-2.5 py-1 rounded-md font-medium ring-1 ${RISK_CLASS}`}>
-          {idea.licenseRisk} license risk · {idea.licenseSpdx}
+        <span className={`text-xs px-2 py-0.5 rounded font-medium ring-1 ${riskClass}`}>
+          {safeText(idea.licenseRisk, "Unknown")} license · {safeText(idea.licenseSpdx, "Unknown")}
         </span>
-        <span className="text-xs px-2.5 py-1 rounded-md bg-zinc-900 ring-1 ring-zinc-800 text-zinc-400">
-          Score {idea.viabilityScore}/10
+        <span className="text-xs px-2 py-0.5 rounded bg-surface-elevated ring-1 ring-hairline text-mute">
+          Score {idea.viabilityScore ?? 0}/10
         </span>
         {idea.isDraft && (
-          <span className="text-xs px-2.5 py-1 rounded-md bg-amber-950/60 ring-1 ring-amber-800 text-amber-400 font-medium">
-            DRAFT — not yet reviewed
+          <span className="text-xs px-2 py-0.5 rounded bg-accent-yellow/10 ring-1 ring-accent-yellow/25 text-accent-yellow font-medium">
+            DRAFT
           </span>
         )}
       </div>
 
       {/* Title */}
-      <h1 className="text-3xl font-semibold tracking-tight mb-2">{idea.productName}</h1>
-      <p className="text-xl text-zinc-400 mb-4">{idea.tagline}</p>
+      <h1 className="text-3xl font-semibold tracking-tight text-ink mb-2">
+        {safeText(idea.productName, idea.repoName)}
+      </h1>
+      {idea.tagline && (
+        <p className="text-lg text-mute mb-5 leading-relaxed">{idea.tagline}</p>
+      )}
 
       {/* Meta row */}
-      <div className="flex flex-wrap items-center gap-4 text-sm text-zinc-500 mb-8">
-        <span>★ {idea.stars?.toLocaleString()}</span>
-        <span>{idea.language}</span>
+      <div className="flex flex-wrap items-center gap-4 text-xs text-ash mb-10 pb-10 border-b border-hairline">
+        <span>★ {formatStars(idea.stars)}</span>
+        <span>{safeText(idea.language, "—")}</span>
         {idea.buildTime && <span>Build: {idea.buildTime}</span>}
-        <a href={idea.githubUrl} target="_blank" rel="noopener noreferrer"
-          className="hover:text-zinc-300 transition-colors">
-          {idea.owner}/{idea.repoName} ↗
-        </a>
+        {idea.githubUrl && (
+          <a href={idea.githubUrl} target="_blank" rel="noopener noreferrer"
+            className="hover:text-mute transition-colors">
+            {safeText(idea.owner)}/{safeText(idea.repoName)} ↗
+          </a>
+        )}
       </div>
 
       {/* Tabs */}

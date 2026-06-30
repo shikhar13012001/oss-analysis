@@ -1,15 +1,22 @@
 """
-Telegram channel listener for public source feeds such as https://t.me/github_repos.
+Telegram channel listener for public source feeds such as
+https://t.me/github_repos.
 
-This uses a Telegram user session via Telethon so Hermes can ingest posts from a
-public channel, extract GitHub URLs, and feed the full post text into analysis.
+Uses a Telegram user session via Telethon so Hermes can ingest posts from a
+public channel, extract GitHub URLs, and feed the full post text into
+analysis.
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
 
 from telethon import TelegramClient, events
-from telethon.errors.rpcerrorlist import PhoneNumberInvalidError
+from telethon.errors.rpcerrorlist import (
+    FloodWaitError,
+    PhoneNumberInvalidError,
+)
 from telethon.sessions import StringSession
 
 from bot.config import (
@@ -21,9 +28,10 @@ from bot.config import (
     TELEGRAM_PHONE,
     TELEGRAM_SESSION_NAME,
     TELEGRAM_SESSION_STRING,
+    validate_listener_config,
 )
 from bot.github_client import RepoNotFoundError, extract_github_url
-from bot.pipeline import analyse_and_save_repo
+from bot.pipeline import PipelineError, analyse_and_save_repo
 from bot.sanity_client import already_processed
 
 logging.basicConfig(
@@ -77,7 +85,7 @@ async def _process_message(message, chat):
     log.info("Analysing %s from %s", github_url, source_channel)
 
     try:
-        _, analysis, slug = await analyse_and_save_repo(
+        result = await analyse_and_save_repo(
             github_url,
             telegram_message_text=text,
             source_channel=source_channel,
@@ -86,11 +94,15 @@ async def _process_message(message, chat):
     except RepoNotFoundError as exc:
         log.warning("Skipping %s: %s", github_url, exc)
         return
+    except PipelineError as exc:
+        log.warning("Pipeline failed for %s: [%s] %s", github_url, exc.stage, exc)
+        return
     except Exception:
         log.exception("Pipeline error for %s", github_url)
         return
 
-    log.info("Saved %s as %s (%s)", github_url, slug, analysis["status"])
+    log.info("Saved %s as %s (%s)",
+             github_url, result.slug, result.analysis.get("status"))
 
 
 async def _backfill_recent_posts(client: TelegramClient, entity):
@@ -104,23 +116,37 @@ async def _backfill_recent_posts(client: TelegramClient, entity):
     )
 
     recent_messages = []
-    async for message in client.iter_messages(entity, limit=TELEGRAM_CHANNEL_BACKFILL_LIMIT):
-        recent_messages.append(message)
+    try:
+        async for message in client.iter_messages(
+            entity, limit=TELEGRAM_CHANNEL_BACKFILL_LIMIT
+        ):
+            recent_messages.append(message)
+    except FloodWaitError as exc:
+        log.warning("Telegram flood wait during backfill: sleeping %ds", exc.seconds)
+        await asyncio.sleep(exc.seconds + 1)
+        return
 
     # Telethon returns newest-first by default. Process oldest-to-newest within
     # just the latest N posts so startup does not crawl ancient channel history.
     for message in reversed(recent_messages):
-        chat = await message.get_chat()
-        await _process_message(message, chat)
+        try:
+            chat = await message.get_chat()
+            await _process_message(message, chat)
+        except FloodWaitError as exc:
+            log.warning("Telegram flood wait: sleeping %ds", exc.seconds)
+            await asyncio.sleep(exc.seconds + 1)
+        except Exception:
+            log.exception("Backfill message failed; continuing")
 
 
 async def main():
-    if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
-        raise RuntimeError(
-            "TELEGRAM_API_ID and TELEGRAM_API_HASH are required for bot.channel_listener."
-        )
+    validate_listener_config()
 
-    session = StringSession(TELEGRAM_SESSION_STRING) if TELEGRAM_SESSION_STRING else TELEGRAM_SESSION_NAME
+    session = (
+        StringSession(TELEGRAM_SESSION_STRING)
+        if TELEGRAM_SESSION_STRING
+        else TELEGRAM_SESSION_NAME
+    )
     client = TelegramClient(session, TELEGRAM_API_ID, TELEGRAM_API_HASH)
     try:
         await client.start(phone=TELEGRAM_PHONE or None)
@@ -130,16 +156,26 @@ async def main():
             "international format, for example +919555607181."
         ) from exc
 
-    entity = await client.get_entity(_channel_ref())
-    chat = await client.get_entity(entity)
+    try:
+        entity = await client.get_entity(_channel_ref())
+        chat = await client.get_entity(entity)
+    except Exception as exc:
+        raise RuntimeError(f"Could not resolve channel {_channel_ref()}: {exc}") from exc
+
     log.info("Listening to %s", _channel_label(chat))
 
     await _backfill_recent_posts(client, entity)
 
     @client.on(events.NewMessage(chats=entity))
     async def on_new_message(event):
-        event_chat = await event.get_chat()
-        await _process_message(event.message, event_chat)
+        try:
+            event_chat = await event.get_chat()
+            await _process_message(event.message, event_chat)
+        except FloodWaitError as exc:
+            log.warning("Telegram flood wait: sleeping %ds", exc.seconds)
+            await asyncio.sleep(exc.seconds + 1)
+        except Exception:
+            log.exception("Listener message failed")
 
     await client.run_until_disconnected()
 

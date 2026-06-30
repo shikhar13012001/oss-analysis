@@ -1,3 +1,17 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    font-feature-settings: "calt", "kern", "liga", "ss03";
+  }
+}
+
+/* Hero diagonal stripe — three angled bands, used once in the hero only */
+.hero-stripe {
+  background-image:
+    linear-gradient(135deg, transparent 20%, rgba(255,87,87,0.09) 20%, rgba(161,19,26,0.06) 33%, transparent 33%),
+    linear-gradient(135deg, transparent 37%, rgba(255,87,87,0.06) 37%, rgba(161,19,26,0.04) 50%, transparent 50%),
+    linear-gradient(135deg, transparent 54%, rgba(255,87,87,0.04) 54%, rgba(161,19,26,0.02) 67%, transparent 67%);
+}
